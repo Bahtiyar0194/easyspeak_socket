@@ -1,22 +1,14 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const { ExpressPeerServer } = require('peer');
+const { PeerServer } = require('peer');
+const { Server } = require("socket.io");
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
-
-// Настройка PeerJS сервера, используя существующий HTTP сервер
-const peerServer = ExpressPeerServer(server, {
-    path: '/app'
+const io = new Server(3001, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
 });
 
-app.use('/peerjs', peerServer);
-
-app.get('/', (req, res) => {
-    res.send('Server is running');
-});
+const peerServer = PeerServer({ port: 3002, path: '/peerjs/app' });
 
 io.on('connection', (socket) => {
     socket.on('join-room', (roomId, userId) => {
@@ -33,9 +25,4 @@ io.on('connection', (socket) => {
     socket.on('message', (roomId, data) => {
         socket.broadcast.to(roomId).emit('new-message', data)
     });
-});
-
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
 });
