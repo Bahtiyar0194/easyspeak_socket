@@ -8,7 +8,7 @@ const io = new Server(3001, {
     }
 });
 
-const peerServer = PeerServer({ port: 3002, path: '/peerjs/app' });
+const peerServer = PeerServer({ port: 3002, path: '/pee' });
 
 io.on('connection', (socket) => {
     socket.on('join-room', (roomId, userId) => {
