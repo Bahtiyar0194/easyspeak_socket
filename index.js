@@ -19,14 +19,16 @@ io.on('connection', (socket) => {
         console.log(userId + ' connected');
         socket.join(roomId);
         socket.broadcast.to(roomId).emit('user-connected', userId);
+
+        socket.on('user-disconnect', (roomId, userId) => {
+            console.log(userId + ' disconnected')
+            socket.broadcast.to(roomId).emit('user-disconnected', userId);
+        });
+    
+        socket.on('message', (roomId, data) => {
+            socket.broadcast.to(roomId).emit('new-message', data)
+        });
     });
 
-    socket.on('user-disconnect', (roomId, userId) => {
-        console.log(userId + ' disconnected')
-        socket.broadcast.to(roomId).emit('user-disconnected', userId);
-    });
 
-    socket.on('message', (roomId, data) => {
-        socket.broadcast.to(roomId).emit('new-message', data)
-    });
 });
