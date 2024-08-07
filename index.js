@@ -2,13 +2,30 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const { ExpressPeerServer } = require('peer');
+const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+
+// Настройка CORS
+app.use(cors({
+    origin: 'http://localhost:3000', // Укажите ваш фронтенд домен
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type'],
+    credentials: true
+}));
+
+const io = new Server(server, {
+    cors: {
+        origin: 'http://localhost:3000', // Укажите ваш фронтенд домен
+        methods: ['GET', 'POST'],
+        allowedHeaders: ['Content-Type'],
+        credentials: true
+    }
+});
 
 const peerServer = ExpressPeerServer(server, {
-    debug: true,
+    debug: true
 });
 
 app.use('/peerjs/myapp', peerServer);
