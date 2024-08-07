@@ -9,7 +9,7 @@ const server = http.createServer(app);
 
 // Настройка CORS
 app.use(cors({
-    origin: 'http://localhost:3000', // Укажите ваш фронтенд домен
+    origin: '*', // Укажите ваш фронтенд домен
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type'],
     credentials: true
@@ -17,13 +17,13 @@ app.use(cors({
 
 const io = new Server(server, {
     cors: {
-        origin: 'http://localhost:3000', // Укажите ваш фронтенд домен
+        origin: '*', // Укажите ваш фронтенд домен
         methods: ['GET', 'POST'],
         allowedHeaders: ['Content-Type'],
         credentials: true
     },
     transports: ['websocket', 'polling']
-});
+}); 
 
 const peerServer = ExpressPeerServer(server, {
     debug: true
