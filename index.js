@@ -1,38 +1,31 @@
-const { PeerServer } = require('peer');
-const { Server } = require("socket.io");
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const { ExpressPeerServer } = require('peer');
 
-const io = new Server(3001, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+const peerServer = ExpressPeerServer(server, {
+    debug: true,
 });
 
-const peerServer = PeerServer({ 
-    port: 3002, 
-    path: '/peerjs/myapp',
-    debug: true
-});
+app.use('/peerjs', peerServer);
 
 io.on('connection', (socket) => {
+    console.log('a user connected:', socket.id);
+
     socket.on('join-room', (roomId, userId) => {
-        console.log(userId + ' connected');
         socket.join(roomId);
         socket.to(roomId).emit('user-connected', userId);
 
-        socket.on('user-disconnect', (roomId, userId) => {
-            console.log(userId + ' disconnected')
+        socket.on('disconnect', () => {
             socket.to(roomId).emit('user-disconnected', userId);
         });
-
-        // socket.on('disconnect', () => {
-        //     socket.to(roomId).emit('user-disconnected', userId);
-        // });
-    
-        socket.on('message', (roomId, data) => {
-            socket.broadcast.to(roomId).emit('new-message', data)
-        });
     });
+});
 
-
+server.listen(3001, () => {
+    console.log('Server is running on port 3001');
 });
