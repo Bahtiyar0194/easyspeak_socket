@@ -11,7 +11,7 @@ const peerServer = ExpressPeerServer(server, {
     debug: true,
 });
 
-app.use('/peerjs', peerServer);
+app.use('/peerjs/myapp', peerServer);
 
 io.on('connection', (socket) => {
     console.log('a user connected:', socket.id);
