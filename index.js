@@ -18,12 +18,16 @@ io.on('connection', (socket) => {
     socket.on('join-room', (roomId, userId) => {
         console.log(userId + ' connected');
         socket.join(roomId);
-        socket.broadcast.to(roomId).emit('user-connected', userId);
+        socket.to(roomId).emit('user-connected', userId);
 
         socket.on('user-disconnect', (roomId, userId) => {
             console.log(userId + ' disconnected')
-            socket.broadcast.to(roomId).emit('user-disconnected', userId);
+            socket.to(roomId).emit('user-disconnected', userId);
         });
+
+        // socket.on('disconnect', () => {
+        //     socket.to(roomId).emit('user-disconnected', userId);
+        // });
     
         socket.on('message', (roomId, data) => {
             socket.broadcast.to(roomId).emit('new-message', data)
