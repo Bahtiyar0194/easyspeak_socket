@@ -8,25 +8,52 @@ const io = new Server(3001, {
     }
 });
 
-const peerServer = PeerServer({ 
-    port: 3002, 
+const peerServer = PeerServer({
+    port: 3002,
     path: '/peerjs/myapp',
     debug: true
 });
 
-io.on('connection', (socket) => {
-    socket.on('join-room', (roomId, userId) => {
-        console.log(userId + ' connected');
-        socket.join(roomId);
-        socket.broadcast.to(roomId).emit('user-connected', userId);
+let clients = [];
 
-        socket.on('user-disconnect', (roomId, userId) => {
-            console.log(userId + ' disconnected')
-            socket.broadcast.to(roomId).emit('user-disconnected', userId);
-        });
-    
-        socket.on('message', (roomId, data) => {
-            socket.broadcast.to(roomId).emit('new-message', data)
-        });
+io.on('connection', (socket) => {
+    clients.push(socket);
+    console.log('Client connected, total:', clients.length);
+
+    let user_id;
+    let room_id;
+
+    socket.on('join-room', (roomId, userId, userName) => {
+        user_id = userId;
+        room_id = roomId;
+
+        try {
+            socket.join(roomId);
+            socket.broadcast.to(roomId).emit('user-connected', userId, userName);
+            console.log('User connected:', userName);
+
+            socket.on('message', (data) => {
+                console.log('Message to room:', roomId);
+                socket.broadcast.to(roomId).emit('new-message', data);
+            });
+
+        } catch (error) {
+            console.error('Error during join-room:', error);
+            socket.disconnect();
+        }
+    });
+
+    socket.on('disconnect', (reason) => {
+        console.log('User disconnected:', user_id, 'Reason:', reason);
+
+        if (room_id && user_id) {
+            socket.broadcast.to(room_id).emit('user-disconnected', user_id);
+        }
+
+        const i = clients.indexOf(socket);
+        if (i !== -1) {
+            clients.splice(i, 1);
+        }
+        console.log('Client disconnected, total:', clients.length);
     });
 });
