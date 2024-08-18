@@ -14,46 +14,55 @@ const peerServer = PeerServer({
     debug: true
 });
 
-let clients = [];
+const rooms = {};
 
 io.on('connection', (socket) => {
-    clients.push(socket);
-    console.log('Client connected, total:', clients.length);
-
-    let user_id;
-    let room_id;
-
-    socket.on('join-room', (roomId, userId, userName) => {
-        user_id = userId;
-        room_id = roomId;
+    socket.on('join-room', (roomId, peerId, userInfo) => {
+        socket.peer_id = peerId;
+        socket.room_id = roomId;
 
         try {
             socket.join(roomId);
-            socket.broadcast.to(roomId).emit('user-connected', userId, userName);
-            console.log('User connected:', userName);
+
+            if (!rooms[roomId]) {
+                rooms[roomId] = [];
+            }
+
+            rooms[roomId].push({ peerId, userInfo });
+
+            socket.broadcast.to(roomId).emit('user-connected', userInfo);
+
+            socket.on('get-room-info', (callback) => {
+                const roomInfo = rooms[roomId] || [];
+                callback(roomInfo);
+            });
 
             socket.on('message', (data) => {
-                console.log('Message to room:', roomId);
                 socket.broadcast.to(roomId).emit('new-message', data);
             });
 
+            socket.on('microphone-volume', (data) => {
+                socket.broadcast.to(roomId).emit('update-volume', data);
+            });
+
         } catch (error) {
-            console.error('Error during join-room:', error);
+            console.error(`Error in join-room: ${error.message}`);
             socket.disconnect();
         }
     });
 
-    socket.on('disconnect', (reason) => {
-        console.log('User disconnected:', user_id, 'Reason:', reason);
+    socket.on('disconnect', () => {
+        if (socket.room_id && socket.peer_id) {
 
-        if (room_id && user_id) {
-            socket.broadcast.to(room_id).emit('user-disconnected', user_id);
-        }
+            rooms[socket.room_id] = rooms[socket.room_id].filter(user => user.peerId !== socket.peer_id);
 
-        const i = clients.indexOf(socket);
-        if (i !== -1) {
-            clients.splice(i, 1);
+            socket.broadcast.to(socket.room_id).emit('user-disconnected', socket.peer_id);
+
+            if (rooms[socket.room_id].length === 0) {
+                delete rooms[socket.room_id];
+            }
+
+            socket.leave(socket.room_id);
         }
-        console.log('Client disconnected, total:', clients.length);
     });
 });
