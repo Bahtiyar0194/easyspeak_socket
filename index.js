@@ -5,7 +5,9 @@ const io = new Server(3001, {
     cors: {
         origin: "*",
         methods: ["GET", "POST"]
-    }
+    },
+    pingTimeout: 5000, // Тайм-аут на получение пинга от клиента (в миллисекундах)
+    pingInterval: 5000  // Интервал отправки пингов клиентам (в миллисекундах)
 });
 
 const peerServer = PeerServer({
@@ -17,24 +19,77 @@ const peerServer = PeerServer({
 const rooms = {};
 
 io.on('connection', (socket) => {
-    socket.on('join-room', (roomId, peerId, userInfo) => {
+    socket.on('join-room', (roomId, peerId, userInfo, isStream, isMuted, callback) => {
+
         socket.peer_id = peerId;
         socket.room_id = roomId;
 
         try {
+            if (peerId === null) {
+                callback({ success: false, message: 'peer_is_null' });
+                return;
+            }
+
+            if (rooms[roomId] && rooms[roomId].some(user => user.peerId === peerId)) {
+                console.log(rooms);
+                callback({ success: false, message: 'peer_already_exists' });
+                return;
+            }
+
             socket.join(roomId);
 
             if (!rooms[roomId]) {
                 rooms[roomId] = [];
             }
 
-            rooms[roomId].push({ peerId, userInfo });
+            rooms[roomId].push({ peerId, userInfo, isStream, isMuted });
+            socket.broadcast.to(roomId).emit('user-connected', userInfo, isStream, isMuted);
 
-            socket.broadcast.to(roomId).emit('user-connected', userInfo);
+            callback({ success: true });
 
             socket.on('get-room-info', (callback) => {
                 const roomInfo = rooms[roomId] || [];
                 callback(roomInfo);
+            });
+
+            socket.on('toggle-video', (data) => {
+                findPeer = rooms[roomId].find((r) => r.peerId === data.peerId);
+                if (findPeer) {
+                    findPeer.isStream = data.isStream;
+                    socket.broadcast.to(roomId).emit('toggle-video', data);
+                }
+            });
+
+            socket.on('toggle-audio', (data) => {
+                findPeer = rooms[roomId].find((r) => r.peerId === data.peerId);
+                if (findPeer) {
+                    findPeer.isMuted = data.isMuted;
+                    socket.broadcast.to(roomId).emit('toggle-audio', data);
+                }
+            });
+
+            socket.on('startDrawing', (data) => {
+                socket.broadcast.emit('startDrawing', data);
+            });
+
+            socket.on('drawing', (data) => {
+                socket.broadcast.emit('drawing', data);
+            });
+
+            socket.on('stopDrawing', (data) => {
+                socket.broadcast.emit('stopDrawing', data);
+            });
+
+            socket.on('undoDrawing', () => {
+                socket.broadcast.emit('undoDrawing');
+            });
+
+            socket.on('redoDrawing', () => {
+                socket.broadcast.emit('redoDrawing');
+            });
+
+            socket.on('clearDrawing', () => {
+                socket.broadcast.emit('clearDrawing');
             });
 
             socket.on('message', (data) => {
@@ -44,16 +99,13 @@ io.on('connection', (socket) => {
             socket.on('microphone-volume', (data) => {
                 socket.broadcast.to(roomId).emit('update-volume', data);
             });
-
         } catch (error) {
-            console.error(`Error in join-room: ${error.message}`);
             socket.disconnect();
         }
     });
 
     socket.on('disconnect', () => {
         if (socket.room_id && socket.peer_id) {
-
             rooms[socket.room_id] = rooms[socket.room_id].filter(user => user.peerId !== socket.peer_id);
 
             socket.broadcast.to(socket.room_id).emit('user-disconnected', socket.peer_id);
