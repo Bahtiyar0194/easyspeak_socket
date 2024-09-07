@@ -19,7 +19,7 @@ const peerServer = PeerServer({
 const rooms = {};
 
 io.on('connection', (socket) => {
-    socket.on('join-room', (roomId, peerId, userInfo, isStream, isMuted, callback) => {
+    socket.on('join-room', (roomId, peerId, userId, userInfo, isStream, isMuted, callback) => {
 
         socket.peer_id = peerId;
         socket.room_id = roomId;
@@ -31,7 +31,6 @@ io.on('connection', (socket) => {
             }
 
             if (rooms[roomId] && rooms[roomId].some(user => user.peerId === peerId)) {
-                console.log(rooms);
                 callback({ success: false, message: 'peer_already_exists' });
                 return;
             }
@@ -41,8 +40,15 @@ io.on('connection', (socket) => {
             if (!rooms[roomId]) {
                 rooms[roomId] = [];
             }
+            else {
+                findExistUser = rooms[roomId].find((u) => u.userId === userId);
+                if (findExistUser) {
+                    rooms[roomId] = rooms[roomId].filter(user => user.userId !== userId);
+                    socket.broadcast.to(roomId).emit('user-disconnected', findExistUser.peerId);
+                }
+            }
 
-            rooms[roomId].push({ peerId, userInfo, isStream, isMuted });
+            rooms[roomId].push({ peerId, userId, userInfo, isStream, isMuted });
             socket.broadcast.to(roomId).emit('user-connected', userInfo, isStream, isMuted);
 
             callback({ success: true });
