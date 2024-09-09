@@ -82,8 +82,8 @@ io.on('connection', (socket) => {
                 socket.broadcast.emit('drawing', data);
             });
 
-            socket.on('stopDrawing', (data) => {
-                socket.broadcast.emit('stopDrawing', data);
+            socket.on('stopDrawing', () => {
+                socket.broadcast.emit('stopDrawing');
             });
 
             socket.on('undoDrawing', () => {
