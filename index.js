@@ -86,6 +86,10 @@ io.on('connection', (socket) => {
                 socket.broadcast.emit('stopDrawing');
             });
 
+            socket.on('insertText', (data) => {
+                socket.broadcast.emit('insertText', data);
+            });
+
             socket.on('undoDrawing', () => {
                 socket.broadcast.emit('undoDrawing');
             });
