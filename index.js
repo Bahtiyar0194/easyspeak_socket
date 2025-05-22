@@ -109,6 +109,14 @@ io.on('connection', (socket) => {
             socket.on('microphone-volume', (data) => {
                 socket.broadcast.to(roomId).emit('update-volume', data);
             });
+
+            socket.on('show_task', (data) => {
+                socket.broadcast.to(roomId).emit('show_task', data);
+            });
+
+            socket.on('complete_task', (data) => {
+                socket.broadcast.to(roomId).emit('complete_task', data);
+            });
         } catch (error) {
             socket.disconnect();
         }
