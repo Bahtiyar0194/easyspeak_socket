@@ -110,8 +110,20 @@ io.on('connection', (socket) => {
                 socket.broadcast.to(roomId).emit('update-volume', data);
             });
 
-            socket.on('show_task', (data) => {
-                socket.broadcast.to(roomId).emit('show_task', data);
+            socket.on('open_material', (data) => {
+                socket.broadcast.to(roomId).emit('open_material', data);
+            });
+
+            socket.on('open_task', (data) => {
+                socket.broadcast.to(roomId).emit('open_task', data);
+            });
+
+            socket.on('close_task', (data) => {
+                socket.broadcast.to(roomId).emit('close_task', data);
+            });
+
+            socket.on('start_task', (data) => {
+                socket.broadcast.to(roomId).emit('start_task', data);
             });
 
             socket.on('complete_task', (data) => {
