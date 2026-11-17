@@ -19,6 +19,7 @@ const peerServer = PeerServer({
 // Хранилище комнат и сокетов
 const rooms = {};
 const userSockets = new Map(); // userId -> socket.id
+const peerSockets = new Map(); // peerId -> socket.id
 
 io.on('connection', (socket) => {
 
@@ -43,6 +44,7 @@ io.on('connection', (socket) => {
       socket.room_id = roomId;
       socket.user_id = userId;
       userSockets.set(userId, socket.id);
+      peerSockets.set(peerId, socket.id);
 
       socket.join(roomId);
 
@@ -165,6 +167,9 @@ io.on('connection', (socket) => {
 
   // --- ОТКЛЮЧЕНИЕ ---
   socket.on('disconnect', () => {
+    if (socket.user_id) userSockets.delete(socket.user_id);
+    if (socket.peer_id) peerSockets.delete(socket.peer_id);
+
     if (socket.user_id && userSockets.get(socket.user_id) === socket.id) {
       userSockets.delete(socket.user_id);
     }
@@ -179,6 +184,34 @@ io.on('connection', (socket) => {
       }
 
       socket.leave(socket.room_id);
+    }
+  });
+
+  // --- ОБРАБОТКА ICE RESTART ---
+  socket.on('ice_restart', ({ targetPeerId, sdp }) => {
+    const targetSocketId = peerSockets.get(targetPeerId);
+    if (targetSocketId) {
+      // Проверяем, что целевой сокет существует и находится в той же комнате
+      const targetSocket = io.sockets.sockets.get(targetSocketId);
+      if (targetSocket && targetSocket.room_id === socket.room_id) {
+        targetSocket.emit('ice_restart', {
+          senderPeerId: socket.peer_id,
+          sdp: sdp,
+        });
+      }
+    }
+  });
+
+  socket.on('ice_restart_answer', ({ targetPeerId, sdp }) => {
+    const targetSocketId = peerSockets.get(targetPeerId);
+    if (targetSocketId) {
+      const targetSocket = io.sockets.sockets.get(targetSocketId);
+      if (targetSocket && targetSocket.room_id === socket.room_id) {
+        targetSocket.emit('ice_restart_answer', {
+          senderPeerId: socket.peer_id,
+          sdp: sdp,
+        });
+      }
     }
   });
 });
