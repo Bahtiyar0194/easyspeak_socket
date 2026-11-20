@@ -2,12 +2,9 @@ const { PeerServer } = require('peer');
 const { Server } = require("socket.io");
 
 const io = new Server(3001, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  },
-  pingTimeout: 5000,
-  pingInterval: 5000
+  cors: { origin: "*", methods: ["GET", "POST"] },
+  pingInterval: 25000, // было 5000
+  pingTimeout: 20000,  // было 5000
 });
 
 const peerServer = PeerServer({
@@ -60,7 +57,7 @@ io.on('connection', (socket) => {
       }
 
       // Сохраняем участника
-      rooms[roomId].push({ peerId, userId, userInfo, isStream, isMuted });
+      rooms[roomId].push({ peerId, userId, userInfo, isStream, isMuted, socketId: socket.id });
 
       // Уведомляем комнату (передаем полный объект)
       socket.broadcast.to(roomId).emit('user-connected', {
@@ -167,51 +164,24 @@ io.on('connection', (socket) => {
 
   // --- ОТКЛЮЧЕНИЕ ---
   socket.on('disconnect', () => {
-    if (socket.user_id) userSockets.delete(socket.user_id);
-    if (socket.peer_id) peerSockets.delete(socket.peer_id);
-
+    // Удаляем привязки, только если они всё ещё указывают на ЭТОТ сокет
     if (socket.user_id && userSockets.get(socket.user_id) === socket.id) {
       userSockets.delete(socket.user_id);
     }
-
-    if (socket.room_id && socket.peer_id && rooms[socket.room_id]) {
-      rooms[socket.room_id] = rooms[socket.room_id].filter(user => user.peerId !== socket.peer_id);
-
-      socket.broadcast.to(socket.room_id).emit('user-disconnected', socket.peer_id);
-
-      if (rooms[socket.room_id].length === 0) {
-        delete rooms[socket.room_id];
-      }
-
-      socket.leave(socket.room_id);
+    if (socket.peer_id && peerSockets.get(socket.peer_id) === socket.id) {
+      peerSockets.delete(socket.peer_id);
     }
-  });
 
-  // --- ОБРАБОТКА ICE RESTART ---
-  socket.on('ice_restart', ({ targetPeerId, sdp }) => {
-    const targetSocketId = peerSockets.get(targetPeerId);
-    if (targetSocketId) {
-      // Проверяем, что целевой сокет существует и находится в той же комнате
-      const targetSocket = io.sockets.sockets.get(targetSocketId);
-      if (targetSocket && targetSocket.room_id === socket.room_id) {
-        targetSocket.emit('ice_restart', {
-          senderPeerId: socket.peer_id,
-          sdp: sdp,
-        });
-      }
-    }
-  });
+    const roomId = socket.room_id;
+    if (!roomId || !socket.peer_id || !rooms[roomId]) return;
 
-  socket.on('ice_restart_answer', ({ targetPeerId, sdp }) => {
-    const targetSocketId = peerSockets.get(targetPeerId);
-    if (targetSocketId) {
-      const targetSocket = io.sockets.sockets.get(targetSocketId);
-      if (targetSocket && targetSocket.room_id === socket.room_id) {
-        targetSocket.emit('ice_restart_answer', {
-          senderPeerId: socket.peer_id,
-          sdp: sdp,
-        });
-      }
-    }
+    const entry = rooms[roomId].find((u) => u.peerId === socket.peer_id);
+    // Если клиент уже переподключился и перезашёл с новым сокетом,
+    // запись принадлежит новому сокету — не трогаем её
+    if (!entry || entry.socketId !== socket.id) return;
+
+    rooms[roomId] = rooms[roomId].filter((u) => u !== entry);
+    socket.broadcast.to(roomId).emit('user-disconnected', socket.peer_id);
+    if (rooms[roomId].length === 0) delete rooms[roomId];
   });
 });
