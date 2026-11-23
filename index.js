@@ -134,10 +134,6 @@ io.on('connection', (socket) => {
     if (socket.room_id) socket.broadcast.to(socket.room_id).emit('new-message', data);
   });
 
-  socket.on('microphone-volume', (data) => {
-    if (socket.room_id) socket.broadcast.to(socket.room_id).emit('update-volume', data);
-  });
-
   socket.on('open_material', (data) => {
     if (socket.room_id) socket.broadcast.to(socket.room_id).emit('open_material', data);
   });
