@@ -29,6 +29,7 @@ const BOARD_MAX_OBJECTS = 5000;
 const BOARD_MAX_OBJECT_SIZE = 512 * 1024; // байт JSON на объект
 const CHAT_MAX_MESSAGES = 500;
 const CHAT_MAX_LENGTH = 2000; // символов в сообщении
+const BOARD_OPEN_TIMEOUT = 5000; // мс ждём ответа учеников на «открыть доску»
 
 let messageSeq = 0;
 const newMessageId = () => `${Date.now().toString(36)}-${(messageSeq++).toString(36)}`;
@@ -36,7 +37,8 @@ const newMessageId = () => `${Date.now().toString(36)}-${(messageSeq++).toString
 const getBoard = (roomId) => {
   let board = boards.get(roomId);
   if (!board) {
-    board = { objects: new Map(), messages: [], timer: null };
+    // learnersCanEdit — ученикам можно рисовать (включает учитель)
+    board = { objects: new Map(), messages: [], timer: null, learnersCanEdit: false };
     boards.set(roomId, board);
   }
   if (board.timer) {
@@ -65,6 +67,16 @@ const isBoardObject = (obj) => {
 
 const asList = (data) => (Array.isArray(data) ? data : [data]);
 
+// Менять доску может учитель (board_admin) или любой, если учитель разрешил.
+// Флаг board_admin клиент сообщает сам (board:role) — сокет-сервер не знает
+// ролей; это защищает от случайных правок, а не от подделки запроса
+const canEditBoard = (socket) => {
+  if (!socket.room_id) return false;
+  if (socket.board_admin) return true;
+  const board = boards.get(socket.room_id);
+  return Boolean(board && board.learnersCanEdit);
+};
+
 io.on('connection', (socket) => {
 
   socket.on('join-room', (roomId, peerId, userId, userInfo, isStream, isMuted, callback) => {
@@ -74,9 +86,13 @@ io.on('connection', (socket) => {
         return;
       }
 
+      // userId сравниваем строкой: «8» и 8 — один пользователь (иначе старая
+      // запись после F5 не удалялась и давала вторую «свою» плитку)
+      const userKey = String(userId);
+
       // Принудительное отключение старого сокета пользователя (от застревания при F5)
-      if (userSockets.has(userId)) {
-        const oldSocketId = userSockets.get(userId);
+      if (userSockets.has(userKey)) {
+        const oldSocketId = userSockets.get(userKey);
         const oldSocket = io.sockets.sockets.get(oldSocketId);
         if (oldSocket && oldSocket.id !== socket.id) {
           oldSocket.emit('force-disconnect', { reason: 'Переподключение с новой вкладки' });
@@ -87,7 +103,7 @@ io.on('connection', (socket) => {
       socket.peer_id = peerId;
       socket.room_id = roomId;
       socket.user_id = userId;
-      userSockets.set(userId, socket.id);
+      userSockets.set(userKey, socket.id);
       peerSockets.set(peerId, socket.id);
 
       socket.join(roomId);
@@ -99,10 +115,11 @@ io.on('connection', (socket) => {
         rooms[roomId] = [];
       } else {
         // Удаляем устаревшую запись пользователя, если она осталась
-        const existingUser = rooms[roomId].find((u) => u.userId === userId);
-        if (existingUser) {
-          rooms[roomId] = rooms[roomId].filter(user => user.userId !== userId);
-          socket.broadcast.to(roomId).emit('user-disconnected', existingUser.peerId);
+        // Все прежние записи этого пользователя (их могло остаться несколько)
+        const stale = rooms[roomId].filter((u) => String(u.userId) === userKey);
+        if (stale.length) {
+          rooms[roomId] = rooms[roomId].filter((u) => String(u.userId) !== userKey);
+          stale.forEach((u) => socket.broadcast.to(roomId).emit('user-disconnected', u.peerId));
         }
       }
 
@@ -185,12 +202,62 @@ io.on('connection', (socket) => {
     if (typeof callback !== 'function') return;
     // joined: false — сокет ещё не вошёл в комнату (клиент повторит запрос)
     const board = socket.room_id ? boards.get(socket.room_id) : null;
-    callback({ joined: Boolean(socket.room_id), objects: board ? [...board.objects.values()] : [] });
+    callback({
+      joined: Boolean(socket.room_id),
+      objects: board ? [...board.objects.values()] : [],
+      learnersCanEdit: Boolean(board && board.learnersCanEdit),
+    });
+  });
+
+  // Кто я на доске: учитель (может рисовать всегда и управлять доступом)
+  socket.on('board:role', (data) => {
+    socket.board_admin = Boolean(data && data.canManage);
+  });
+
+  // Учитель открывает доску у учеников. Каждый отвечает: открыл / занят
+  // заданием (у таких окно задания не трогаем). Кто не ответил за
+  // BOARD_OPEN_TIMEOUT — попадает в noResponse (связь, вкладка в фоне)
+  socket.on('board:open-for-all', (callback) => {
+    if (typeof callback !== 'function') return;
+    if (!socket.room_id || !socket.board_admin) {
+      callback({ success: false });
+      return;
+    }
+
+    const roomId = socket.room_id;
+    socket.broadcast
+      .to(roomId)
+      .timeout(BOARD_OPEN_TIMEOUT)
+      .emit('board:open', {}, (err, responses) => {
+        const list = Array.isArray(responses) ? responses.filter(Boolean) : [];
+        const answered = new Set(list.map((r) => String(r.userId)));
+        const others = (rooms[roomId] || []).filter((u) => u.socketId !== socket.id);
+        callback({
+          success: true,
+          opened: list.filter((r) => r.status === 'opened'),
+          busy: list.filter((r) => r.status === 'busy'),
+          noResponse: others
+            .filter((u) => !answered.has(String(u.userId)))
+            .map((u) => ({ userId: u.userId, userInfo: u.userInfo })),
+        });
+      });
+  });
+
+  // Учитель разрешает / запрещает ученикам рисовать — сообщаем всей комнате
+  socket.on('board:set-access', (value, callback) => {
+    if (!socket.room_id || !socket.board_admin) {
+      if (typeof callback === 'function') callback({ success: false });
+      return;
+    }
+    const board = getBoard(socket.room_id);
+    board.learnersCanEdit = Boolean(value);
+    io.to(socket.room_id).emit('board:access', { learnersCanEdit: board.learnersCanEdit });
+    if (typeof callback === 'function') callback({ success: true, learnersCanEdit: board.learnersCanEdit });
   });
 
   // Добавить объект(ы). Существующий id заменяется на месте (тот же слой)
   socket.on('board:add', (data) => {
-    if (!socket.room_id) return;
+    if (!canEditBoard(socket)) return;
     const board = getBoard(socket.room_id);
     const added = asList(data).filter((obj) => {
       if (!isBoardObject(obj)) return false;
@@ -203,7 +270,7 @@ io.on('connection', (socket) => {
 
   // Изменить объект(ы): перемещение, масштаб, текст. Удалённые не воскрешаем
   socket.on('board:update', (data) => {
-    if (!socket.room_id) return;
+    if (!canEditBoard(socket)) return;
     const board = getBoard(socket.room_id);
     const updated = asList(data).filter((obj) => {
       if (!isBoardObject(obj) || !board.objects.has(obj.id)) return false;
@@ -214,7 +281,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('board:remove', (ids) => {
-    if (!socket.room_id) return;
+    if (!canEditBoard(socket)) return;
     const board = getBoard(socket.room_id);
     const removed = asList(ids).filter((id) => typeof id === 'string' && board.objects.delete(id));
     if (removed.length) socket.broadcast.to(socket.room_id).emit('board:remove', removed);
@@ -222,7 +289,7 @@ io.on('connection', (socket) => {
 
   // На задний план (например, картинку под рисунки): меняем порядок слоёв
   socket.on('board:to-back', (ids) => {
-    if (!socket.room_id) return;
+    if (!canEditBoard(socket)) return;
     const board = getBoard(socket.room_id);
     const moved = asList(ids).filter((id) => typeof id === 'string' && board.objects.has(id));
     if (!moved.length) return;
@@ -233,14 +300,14 @@ io.on('connection', (socket) => {
   });
 
   socket.on('board:clear', () => {
-    if (!socket.room_id) return;
+    if (!canEditBoard(socket)) return;
     getBoard(socket.room_id).objects.clear();
     socket.broadcast.to(socket.room_id).emit('board:clear');
   });
 
   // Черновик: штрих/фигура, которые сейчас рисуют (не сохраняется), и его конец
   socket.on('board:draft', (data) => {
-    if (socket.room_id) socket.broadcast.to(socket.room_id).emit('board:draft', data);
+    if (canEditBoard(socket)) socket.broadcast.to(socket.room_id).emit('board:draft', data);
   });
 
   socket.on('board:draft-end', (id) => {
@@ -317,8 +384,8 @@ io.on('connection', (socket) => {
   // --- ОТКЛЮЧЕНИЕ ---
   socket.on('disconnect', () => {
     // Удаляем привязки, только если они всё ещё указывают на ЭТОТ сокет
-    if (socket.user_id && userSockets.get(socket.user_id) === socket.id) {
-      userSockets.delete(socket.user_id);
+    if (socket.user_id != null && userSockets.get(String(socket.user_id)) === socket.id) {
+      userSockets.delete(String(socket.user_id));
     }
     if (socket.peer_id && peerSockets.get(socket.peer_id) === socket.id) {
       peerSockets.delete(socket.peer_id);
